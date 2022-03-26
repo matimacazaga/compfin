@@ -1,8 +1,12 @@
-from ast import Call
 from typing import Callable
 
 
-def newton_method(function: Callable, derivative: Callable, initial_guess: float = 0.1, verbose: bool = False):
+def newton_method(
+    function: Callable,
+    derivative: Callable,
+    initial_guess: float = 0.1,
+    verbose: bool = False,
+):
 
     error = 1e10
 
@@ -15,7 +19,7 @@ def newton_method(function: Callable, derivative: Callable, initial_guess: float
         g = function(root)
         g_prim = derivative(root)
 
-        root -= g/g_prim
+        root -= g / g_prim
 
         error = abs(g)
 
