@@ -1,4 +1,4 @@
-from ..paths_generator import geometric_brownian_motion, discount_rate
+from ..models import geometric_brownian_motion, discount_rate
 import numpy as np
 import unittest
 
@@ -17,7 +17,7 @@ class TestPathsGeneration(unittest.TestCase):
             number_of_steps=number_of_steps,
             simulation_time=simulation_time,
             drift=risk_free_rate,
-            std_deviation=std_deviation,
+            diffusion=std_deviation,
             initial_value=initial_value,
         )
         dr = discount_rate(risk_free_rate, simulation_time)

@@ -1,40 +1,11 @@
+from os import get_terminal_size
 import numpy as np
 from abc import ABC, abstractmethod
 from numbers import Number
 from typing import Optional, Tuple, Union
 from enum import Enum
 from numba import njit, prange, float64, int32
-
-
-class Measure(Enum):
-
-    P = 0
-    Q = 1
-
-
-@njit(
-    "float64[:, :](int32, int32, float64, int32, float64, float64)",
-    parallel=True,
-    cache=True,
-)
-def _generate_jumps(
-    number_of_paths: int,
-    number_of_steps: int,
-    dt: float,
-    poisson_rate: int,
-    jump_magnitude_mean: float,
-    jump_magnitude_volatility: float,
-) -> np.ndarray:
-
-    jumps = np.zeros((number_of_paths, number_of_steps))
-
-    for i in prange(jumps.shape[0]):
-        for j in range(jumps.shape[1]):
-            jumps[i, j] = np.random.poisson(poisson_rate * dt) * np.random.normal(
-                jump_magnitude_mean, jump_magnitude_volatility
-            )
-
-    return jumps
+from numba.types import Tuple as nb_Tuple
 
 
 @njit(cache=True)
@@ -50,14 +21,14 @@ def nb_cumsum(array: np.ndarray, exp: bool = False):
     return out
 
 
-@njit("float64(int32, float64)", cache=True)
+@njit(float64(int32, float64), cache=True)
 def get_dt(number_of_steps: int, simulation_time: float) -> float:
 
     return simulation_time / number_of_steps
 
 
 @njit(
-    "Tuple((float64[:], float64[:, :]))(int32, int32, float64, float64, float64, float64)",
+    nb_Tuple((float64[:], float64[:, :]))(int32, int32, float64, float64, float64, float64),
     parallel=True,
     cache=True,
 )
@@ -66,7 +37,7 @@ def arithmetic_brownian_motion(
     number_of_steps: int,
     simulation_time: float,
     drift: float,
-    std_deviation: float,
+    diffusion: float,
     initial_value: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
 
@@ -85,14 +56,14 @@ def arithmetic_brownian_motion(
             paths[i, j + 1] = (
                 paths[i, j]
                 + drift * dt
-                + std_deviation * np.random.normal() * dt ** 0.5
+                + diffusion * np.random.normal() * dt ** 0.5
             )
 
     return time, paths
 
 
 @njit(
-    "Tuple((float64[:], float64[:, :]))(int32, int32, float64, float64, float64, float64)",
+    nb_Tuple((float64[:], float64[:, :]))(int32, int32, float64, float64, float64, float64),
     parallel=True,
     cache=True,
 )
@@ -101,7 +72,7 @@ def geometric_brownian_motion(
     number_of_steps: int,
     simulation_time: float,
     drift: float,
-    std_deviation: float,
+    diffusion: float,
     initial_value: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
 
@@ -118,80 +89,84 @@ def geometric_brownian_motion(
         for j in range(number_of_steps):
 
             paths[i, j + 1] = paths[i, j] * (
-                1.0 + drift * dt + std_deviation * np.random.normal() * dt ** 0.5
+                1.0 + drift * dt + diffusion * np.random.normal() * dt ** 0.5
             )
 
     return time, paths
 
 
-def merton_jump_diffusion():
-    pass
+@njit(float64(float64, float64), cache=True)
+def get_expectation_jump_magnitude(jump_magnitude_mean, jump_magnitude_std):
+    return np.exp(jump_magnitude_mean + 0.5 * jump_magnitude_std ** 2) - 1.0
 
 
-# class ArithmeticBrownianMotion(RandomPath):
-#     def generate(
-#         self,
-#         number_of_paths: int,
-#         number_of_steps: int,
-#         simulation_time: Number,
-#         drift: float,
-#         volatility: float,
-#         initial_value: float,
-#     ) -> Tuple[np.ndarray, np.ndarray]:
+@njit(float64(float64, float64, float64, float64, float64), cache=True)
+def get_q_measure_drift_merton_jump_diffusion(
+    risk_free_rate: float,
+    diffusion: float,
+    poisson_rate: float,
+    jump_magnitude_mean: float,
+    jump_magnitude_std: float,
+):
 
-#         paths = np.zeros(shape=(number_of_paths, number_of_steps + 1))
-
-#         time = np.linspace(0.0, simulation_time, num=number_of_steps + 1)
-
-#         paths[:, 0] = initial_value
-
-#         dt = self._get_dt(number_of_steps, simulation_time)
-
-#         paths[:, 1:] = _generate_abm(
-#             number_of_paths, number_of_steps, drift, volatility, dt
-#         )
-
-#         paths = nb_cumsum(paths)
-
-#         return time, paths
+    return (
+        risk_free_rate
+        - poisson_rate
+        * get_expectation_jump_magnitude(
+            jump_magnitude_mean, jump_magnitude_std
+        )
+        - 0.5 * diffusion ** 2
+    )
 
 
-# class GeometricBrownianMotion(ArithmeticBrownianMotion):
-#     def generate(
-#         self,
-#         number_of_paths: int,
-#         number_of_steps: int,
-#         simulation_time: Number,
-#         risk_free_rate: float,
-#         drift: float,
-#         volatility: float,
-#         initial_value: float,
-#         measure: Measure,
-#     ) -> Tuple[np.ndarray, np.ndarray]:
+@njit(
+    nb_Tuple((float64[:], float64[:, :]))(int32, int32, float64, float64, float64, float64, float64, float64, float64),
+    parallel=True,
+    cache=True,
+)
+def merton_jump_diffusion(
+    number_of_paths: int,
+    number_of_steps: int,
+    simulation_time: float,
+    drift: float,
+    diffusion: float,
+    poisson_rate: float,
+    jump_magnitude_mean:float,
+    jump_magnitude_std:float,
+    initial_value: float,
+) -> Tuple[np.ndarray, np.ndarray]:
 
-#         paths = np.zeros(shape=(number_of_paths, number_of_steps + 1))
+    paths = np.zeros((number_of_paths, number_of_steps + 1))
 
-#         time = np.linspace(0.0, simulation_time, num=number_of_steps + 1)
+    time = np.linspace(0., simulation_time, number_of_steps + 1)
 
-#         dt = self._get_dt(number_of_steps, simulation_time)
+    paths[:, 0] = initial_value
 
-#         drift_ = drift if measure == Measure.P else risk_free_rate
+    dt = get_dt(number_of_steps, simulation_time)
 
-#         drift_ -= 0.5 * volatility ** 2
+    for i in prange(paths.shape[0]):
 
-#         paths[:, 0] = np.log(initial_value)
+        for j in range(paths.shape[1]):
 
-#         paths[:, 1:] = _generate_abm(
-#             number_of_paths, number_of_steps, drift_, volatility, dt
-#         )
+            paths[i, j+1] = paths[i, j] * (
+                1.0
+                + (
+                    (drift + 0.5*diffusion*diffusion)*dt
+                    + diffusion*np.random.normal()*dt**0.5
+                    + (
+                        np.exp(
+                            np.random.normal(
+                                jump_magnitude_mean,
+                                jump_magnitude_std
+                            )
+                        ) - 1.0
+                    )*np.random.poisson(poisson_rate*dt)
+                )
+            )
 
-#         paths = nb_cumsum(paths, exp=True)
+    return time, paths
 
-#         return time, paths
 
-#     def generate_from_abm(abm_paths: np.array) -> np.ndarray:
-
-#         return np.exp(abm_paths)
 
 
 # class MertonModel(ArithmeticBrownianMotion):
@@ -270,7 +245,7 @@ def merton_jump_diffusion():
 
 
 @njit([float64[:](float64, float64[:]), float64(float64, float64)], cache=True)
-def discount_rate(rate: float, time: Union[float, np.ndarray]):
+def discount_rate(rate: float, time: Union[float, np.ndarray])->float:
 
     return np.exp(-rate * time)
 

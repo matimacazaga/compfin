@@ -6,7 +6,6 @@ import scipy.stats as st
 from abc import ABC, abstractmethod
 from root_finding import newton_method
 
-
 @dataclass
 class Option(ABC):
 
